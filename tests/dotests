@@ -8,6 +8,8 @@ var path = require('path');
 var nopt = require('nopt');
 
 var parsed = nopt({
+    'result': Boolean,
+    'diff': Boolean,
     'only-total': Boolean,
     'only-errors': Boolean,
 });
@@ -15,6 +17,8 @@ var parsed = nopt({
 //  ---------------------------------------------------------------------------------------------------------------  //
 
 var yate = require('../lib/yate.js');
+
+require('../lib/actions.js');
 
 //  ---------------------------------------------------------------------------------------------------------------  //
 
@@ -28,10 +32,16 @@ var nTotal = 0;
 var nError = 0;
 var nKnown = 0;
 
-var files = fs.readdirSync('.').sort();
+var files;
+if (parsed.argv.remain.length) {
+    files = parsed.argv.remain;
+} else {
+    files = fs.readdirSync('.').sort();
+}
+
 for (var i = 0, l = files.length; i < l; i++) {
     var filename = files[i];
-    if ( !/\.yate$/.test(filename) ) {
+    if ( !/\.\d+\.yate$/.test(filename) ) {
         continue;
     }
 
@@ -52,13 +62,23 @@ for (var i = 0, l = files.length; i < l; i++) {
     var status, desc;
 
     try {
-        var result = yate.run( tmpfile, options.data || defaultData, options.externals );
+        var result = yate.run( tmpfile, { data: options.data || {} }, options.externals );
 
-        status = (result == options.result) ? 'ok' : 'fail';
-        desc = options.description;
+        if (options.throws) {
+            status = 'fail';
+            desc = 'doesn\'t throw';
+        } else {
+            status = (result == options.result) ? 'ok' : 'fail';
+            desc = options.description;
+        }
     } catch (e) {
-        status = 'throw';
-        desc = e.message;
+        if (options.throws) {
+            status = 'ok';
+            desc = options.description;
+        } else {
+            status = 'throw';
+            desc = e.message;
+        }
     }
 
     var statusColor = 'green', filenameColor = 'gray', descColor = 'gray';
@@ -81,6 +101,15 @@ for (var i = 0, l = files.length; i < l; i++) {
 
     if ( !parsed['only-total'] && ( status !== 'ok' || !parsed['only-errors'] ) ) {
         console.log(format, filename[filenameColor], status[statusColor], desc[descColor]);
+        if (status === 'fail' && parsed.diff) {
+            console.log( format, strpad('result:').red, JSON.stringify(result).red, '' );
+            console.log( format, strpad('expected:').green, JSON.stringify(options.result).green, '' );
+            console.log();
+        } else if (parsed.result) {
+            var color = (status === 'ok') ? 'green' : 'red';
+            console.log( format, strpad('result:')[color], JSON.stringify(result)[color], '' );
+            console.log();
+        }
     }
 }
 
@@ -100,7 +129,7 @@ console.log( 'Tests: ' + nTotal.toString().white + ' = ' + stat.join(' + ') );
 
 console.log('\n');
 
-if ( path.existsSync(tmpfile) ) {
+if ( fs.existsSync(tmpfile) ) {
     fs.unlink(tmpfile);
 }
 
@@ -123,7 +152,7 @@ function parseTest(content) {
     for (var i = 0, l = options.length; i < l; i++) {
         options[i] = options[i].replace(/^\/\/\/\s*/, '');
     }
-    options = JSON.parse( options.join('\n') );
+    options = eval( '(' + options.join('\n') + ')' );
 
     var yate = content.match(/^(?!\/\/\/).*?$/gm).join('\n');
 
